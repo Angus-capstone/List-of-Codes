@@ -1,0 +1,45 @@
+import time
+import array
+import pulseio
+import board
+import adafruit_irremote
+
+# Create a 'PulseOut' to send infrared signals on the IR transmitter @ 38KHz
+pulseout = pulseio.PulseOut(board.GP17, frequency=38000, duty_cycle=2**15)
+
+# IR receiver setup
+ir_receiver = pulseio.PulseIn(board.GP16, maxlen=300, idle_state=True)  # Extended maxlen for longer signals
+decoder = adafruit_irremote.GenericDecode()
+
+while True:
+    print('Waiting to receive signal...')
+    pulses = None
+    
+    # Wait for a valid signal
+    while not pulses:
+        try:
+            pulses = decoder.read_pulses(ir_receiver)
+        except adafruit_irremote.IRNECRepeatException:  # Signal was repeated, ignore
+            pass
+        except adafruit_irremote.IRDecodeException:  # Failed to decode signal
+            pass
+    
+    print(f"Received pulses: {len(pulses)} pulses")
+    
+    # Convert pulses to an array of type 'H' (unsigned short)
+    pulse_array = array.array('H', pulses)
+    print(f"Pulse array: {pulse_array}")
+    
+    # Optional delay before replaying
+    time.sleep(3)
+    
+    for x in range(10):
+        # Replay the received signal
+        print('Replaying signal...')
+        pulseout.send(pulse_array)
+        print('Signal sent!')
+        time.sleep(2)
+    
+    # Clear the receiver buffer
+    ir_receiver.clear()
+    time.sleep(1)  # Delay to allow the receiver to settle
