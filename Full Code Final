@@ -1,0 +1,438 @@
+import wifi
+import socketpool
+import time
+from datetime import now_is_later_than
+import board
+import busio
+import adafruit_shtc3
+import digitalio
+import pulseio
+import array
+from simple_pid import PID
+import displayio
+from adafruit_epd.ssd1675 import Adafruit_SSD1675
+
+# ✅ Initialize PulseOut only once at startup
+ir_led = pulseio.PulseOut(board.GP17, frequency=38000, duty_cycle=2**15)
+
+# ✅ Release any existing display (prevents conflicts)
+displayio.release_displays()
+
+# ✅ Define SPI Bus and Pins for Raspberry Pi Pico
+spi = busio.SPI(board.GP10, board.GP11)  # GP10 = SCK, GP11 = MOSI
+epd_cs = digitalio.DigitalInOut(board.GP9)    # Chip Select (CS)
+epd_dc = digitalio.DigitalInOut(board.GP8)    # Data/Command (DC)
+epd_rst = digitalio.DigitalInOut(board.GP12)  # Reset (RST)
+epd_busy = digitalio.DigitalInOut(board.GP13)  # Busy (BUSY)
+
+# ✅ Initialize the e-paper display
+display = Adafruit_SSD1675(
+            width=122,  # Portrait width
+            height=250,  # Portrait height
+            spi=spi,
+            cs_pin=epd_cs,
+            dc_pin=epd_dc,
+            rst_pin=epd_rst,
+            busy_pin=epd_busy,
+            sramcs_pin=None,
+        )
+# ✅ Set display to landscape mode using rotation
+# Rotation can be 0, 90, 180, or 270
+display.rotation = 1  # Rotate the display 90 degrees for landscape mode
+ 
+# ✅ Clear display
+display.fill(1)  # White background
+display.display()
+time.sleep(2)
+
+
+def send_signal(status):
+    """Sends an IR signal based on status (True for ON, False for OFF)."""
+    if status is True:        
+        print('Sending ON signal...')
+        signal_to_send = array.array('H', [3394, 1696, 462, 1257, 436, 1258, 411, 437, 435, 412, 411, 438, 411, 1283, 411, 441, 410, 433, 435, 1260, 412, 1288, 435, 410, 435, 1261, 435, 413, 410, 435, 410, 1285, 410, 1285, 436, 412, 435, 1262, 434, 1259, 411, 437, 411, 441, 410, 1284, 434, 411, 410, 437, 411, 1284, 435, 415, 410, 435, 436, 415, 436, 409, 410, 438, 434, 415, 436, 411, 411, 435, 411, 437, 435, 415, 436, 411, 410, 437, 411, 435, 435, 413, 411, 438, 435, 411, 435, 413, 410, 439, 410, 436, 436, 414, 411, 1286, 435, 408, 411, 437, 435, 414, 411, 435, 436, 412, 434, 1261, 435, 1263, 411, 434, 411, 437, 410, 438, 434, 413, 435, 414, 435, 411, 435, 1260, 411, 438, 435, 411, 411, 437, 435, 413, 410, 437, 411, 1286, 411, 1283, 410, 439, 410, 1285, 411, 1283, 435, 413, 410, 439, 434, 1261, 434, 1260, 434, 414, 434, 1261, 410, 1286, 410, 1287, 410, 1283, 433, 417, 434, 1260, 433, 1264, 408, 1289, 407, 1286, 408, 438, 408, 443, 432, 413, 407, 1288, 432, 414, 407, 445, 432, 412, 430, 417, 406, 444, 431, 415, 406, 446, 430, 413, 406, 444, 431, 416, 405, 443, 405, 441, 405, 442, 430, 419, 405, 443, 405, 441, 405, 444, 405, 442, 404, 443, 405, 443, 404, 443, 405, 445, 404, 442, 404, 446, 403, 443, 403, 447, 404, 444, 403, 444, 402, 445, 402, 444, 403, 445, 403, 447, 402, 446, 402, 467, 378, 470, 377, 472, 377, 469, 377, 474, 377, 467, 377, 474, 377, 469, 377, 471, 352, 494, 376, 472, 376, 474, 352, 495, 352, 495, 377, 474, 352, 1340, 352, 497, 352, 1342, 352, 497, 352, 1340, 352, 497, 351, 496, 352, 1344, 350])
+    else:
+        print('Sending OFF signal...')
+        signal_to_send = array.array('H', [3394, 1697, 438, 1283, 411, 1284, 435, 413, 411, 438, 409, 439, 437, 1259, 436, 416, 435, 409, 436, 1261, 410, 1290, 411, 434, 411, 1287, 411, 437, 435, 411, 434, 1262, 410, 1286, 410, 438, 434, 1264, 435, 1259, 411, 437, 411, 442, 410, 1285, 410, 435, 434, 414, 436, 1261, 433, 416, 435, 412, 435, 416, 409, 437, 433, 414, 410, 439, 435, 414, 435, 411, 433, 415, 410, 441, 435, 412, 434, 414, 409, 438, 434, 415, 433, 416, 434, 412, 433, 416, 433, 417, 432, 414, 408, 440, 434, 415, 432, 415, 409, 443, 432, 415, 432, 415, 433, 414, 408, 1288, 432, 1266, 432, 415, 407, 444, 432, 413, 407, 444, 407, 439, 433, 416, 407, 1288, 432, 416, 407, 441, 432, 417, 432, 416, 406, 441, 432, 1265, 432, 1265, 407, 440, 432, 1269, 431, 1263, 432, 417, 431, 414, 431, 1265, 431, 1266, 406, 441, 431, 1266, 430, 1266, 431, 1266, 407, 1291, 430, 417, 430, 1267, 405, 1289, 431, 1265, 431, 1265, 432, 417, 405, 443, 405, 443, 405, 1291, 406, 444, 405, 441, 430, 419, 405, 443, 405, 443, 430, 419, 405, 442, 431, 420, 406, 443, 404, 440, 406, 443, 405, 447, 405, 441, 406, 443, 405, 442, 405, 441, 430, 418, 405, 444, 429, 420, 405, 444, 405, 441, 405, 443, 405, 443, 405, 447, 405, 440, 404, 444, 404, 446, 404, 442, 429, 425, 403, 439, 405, 444, 404, 445, 405, 443, 404, 443, 404, 445, 403, 443, 405, 446, 404, 443, 404, 444, 403, 445, 404, 444, 403, 445, 403, 450, 403, 443, 404, 441, 404, 445, 403, 445, 403, 470, 379, 1292, 404, 445, 403, 1298, 403, 466, 378, 1292, 403, 1294, 404, 1292, 403, 445, 403])
+
+    # ✅ Use the global ir_led PulseOut object instead of creating a new one
+    ir_led.send(signal_to_send)
+    print("Signal Sent!")
+
+SSID = "AirTies4920_779C"
+PASSWORD = "ytPDYfftS9"
+PI_IP = "192.168.1.178"  # Replace with Raspberry Pi's IP
+PORT = 8080
+
+# Connect to Wi-Fi
+print("Connecting to Wi-Fi...")
+wifi.radio.connect(SSID, PASSWORD)
+print("Connected! Pico W IP:", wifi.radio.ipv4_address)
+
+# Placeholder function to simulate setting temperature
+
+# Define scaling function to map PID output to AC settings (18-25)
+def scale_pid_to_ac(pid_output, min_pid=-24, max_pid=25, min_ac=18, max_ac=25):
+    """
+    Maps a PID output value to a discrete AC setting between 18 and 25.
+    """
+    # Ensure PID output is within expected range
+    pid_output = max(min_pid, min(pid_output, max_pid))
+    
+    # Apply scaling formula
+    scaled_ac = min_ac + ((pid_output - min_pid) / (max_pid - min_pid)) * (max_ac - min_ac)
+    
+    # Round to the nearest whole number (since AC has discrete steps)
+    return round(scaled_ac)
+
+#MANUAL OVERWRITE FUNCTION
+def manual_set_temperature(temp):
+    
+
+    ac_setting = temp  # ac setting to match manual set temp
+
+    print(f"Setting AC to: {ac_setting}°C")
+
+
+    # Only send signal if AC setting has changed
+    if ac_setting != 0:
+        if ac_setting == 18:
+            set_temp_18()
+            
+        elif ac_setting == 19:
+            set_temp_19()
+            
+        elif ac_setting == 20:
+            set_temp_20()
+            
+        elif ac_setting == 21:
+            set_temp_21()
+           
+        elif ac_setting == 22:
+            set_temp_22()
+            
+        elif ac_setting == 23:
+            set_temp_23()
+            
+        elif ac_setting == 24:
+            set_temp_24()
+            
+        elif ac_setting == 25:
+            set_temp_25()
+            
+    else:
+        print("error attempting manual set temp!")
+
+def set_temperature(temp):
+    
+    """Adjusts AC temperature using PID control."""
+    global last_set_temperature  # Keep track of last AC setting
+    current_temp, _ = shtc3.measurements  # Read current room temp
+    pid_output = pid(current_temp)  # Get PID control signal
+    ac_setting = scale_pid_to_ac(pid_output)  # Map PID output to AC setting
+
+    print(f"Setting AC to: {ac_setting}°C")
+
+
+    # Only send signal if AC setting has changed
+    if ac_setting != last_set_temperature:
+        if ac_setting == 18:
+            set_temp_18()
+            last_set_temperature = ac_setting  # Update last set value/ control overwrite
+        elif ac_setting == 19:
+            set_temp_19()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 20:
+            set_temp_20()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 21:
+            set_temp_21()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 22:
+            set_temp_22()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 23:
+            set_temp_23()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 24:
+            set_temp_24()
+            last_set_temperature = ac_setting  # Update last set value
+        elif ac_setting == 25:
+            set_temp_25()
+            last_set_temperature = ac_setting  # Update last set value
+    else:
+        print("No change in AC setting. Skipping redundant signal.")
+        
+      
+    
+def set_temp_18():
+    signal_to_send = array.array('H', [3401, 1694, 436, 1284, 412, 1289, 412, 433, 412, 435, 411, 440, 411, 1283, 412, 435, 411, 439, 411, 1286, 411, 1284, 411, 439, 410, 1283, 410, 438, 410, 438, 411, 1287, 410, 1285, 410, 438, 410, 1289, 410, 1287, 410, 434, 410, 439, 409, 1287, 409, 440, 410, 441, 410, 1285, 410, 438, 410, 437, 410, 436, 410, 443, 409, 437, 410, 438, 410, 438, 410, 436, 409, 439, 410, 438, 410, 439, 410, 440, 410, 435, 410, 438, 410, 438, 410, 443, 409, 434, 410, 438, 410, 441, 410, 435, 410, 1288, 410, 437, 409, 440, 410, 437, 410, 439, 410, 441, 410, 1282, 410, 1286, 410, 440, 410, 438, 409, 439, 409, 441, 409, 1285, 410, 441, 410, 434, 409, 439, 410, 441, 409, 438, 409, 438, 409, 439, 408, 1288, 409, 1289, 408, 440, 408, 1286, 409, 1288, 408, 441, 409, 440, 408, 1289, 408, 1287, 408, 441, 408, 1288, 408, 1287, 408, 1287, 407, 1289, 408, 442, 407, 441, 407, 439, 408, 440, 408, 443, 408, 439, 407, 441, 407, 440, 407, 441, 407, 441, 407, 441, 407, 441, 407, 443, 406, 441, 406, 442, 406, 442, 406, 445, 406, 442, 406, 440, 406, 443, 405, 441, 406, 442, 406, 445, 406, 441, 405, 441, 406, 442, 406, 444, 405, 442, 405, 446, 405, 440, 405, 443, 405, 445, 405, 443, 405, 442, 404, 444, 405, 446, 404, 442, 405, 443, 405, 442, 405, 443, 405, 445, 404, 442, 405, 443, 405, 445, 404, 443, 404, 445, 404, 443, 404, 444, 404, 447, 404, 442, 405, 444, 404, 447, 403, 444, 403, 445, 403, 443, 404, 444, 404, 443, 403, 445, 404, 446, 403, 446, 404, 441, 404, 445, 403, 445, 403, 446, 403, 444, 403])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 18!")
+    
+def set_temp_19():
+    signal_to_send = array.array('H', [3401, 1694, 436, 1285, 413, 1283, 412, 438, 413, 433, 411, 437, 412, 1287, 411, 436, 411, 438, 411, 1287, 410, 1284, 411, 435, 410, 1287, 411, 436, 410, 438, 411, 1288, 410, 1285, 410, 437, 410, 1286, 410, 1286, 410, 438, 410, 440, 410, 1284, 410, 439, 410, 438, 410, 1290, 410, 434, 410, 438, 410, 440, 409, 437, 410, 443, 409, 434, 410, 438, 410, 440, 410, 438, 410, 437, 410, 438, 410, 438, 410, 439, 410, 437, 410, 439, 410, 437, 410, 438, 410, 438, 410, 443, 410, 433, 410, 1289, 410, 437, 410, 437, 410, 439, 410, 437, 410, 438, 410, 1288, 409, 1285, 410, 441, 410, 439, 409, 436, 409, 1288, 410, 1285, 409, 442, 409, 438, 409, 439, 409, 437, 410, 439, 409, 440, 409, 438, 409, 1288, 409, 1286, 409, 439, 409, 1287, 409, 1292, 408, 436, 408, 440, 408, 1290, 408, 1287, 408, 440, 407, 1289, 408, 1288, 408, 1288, 408, 1292, 408, 436, 408, 440, 408, 442, 407, 441, 407, 440, 407, 441, 407, 441, 407, 442, 407, 444, 407, 439, 406, 440, 407, 442, 406, 442, 406, 446, 406, 441, 406, 439, 406, 443, 407, 440, 406, 442, 406, 442, 406, 444, 406, 442, 406, 441, 405, 443, 405, 443, 405, 447, 406, 438, 405, 443, 405, 445, 405, 441, 405, 448, 405, 438, 405, 446, 405, 442, 405, 443, 405, 442, 405, 443, 405, 443, 405, 445, 404, 444, 404, 444, 404, 443, 404, 444, 404, 444, 404, 444, 404, 445, 405, 442, 404, 444, 404, 444, 404, 445, 404, 447, 404, 442, 404, 444, 404, 443, 404, 444, 404, 444, 404, 444, 404, 1296, 404, 443, 404, 444, 404, 443, 404, 443, 403, 449, 404, 443, 403, 442, 403])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 19!")
+    
+def set_temp_20():
+    signal_to_send = array.array('H', [3399, 1697, 437, 1282, 413, 1282, 413, 435, 413, 436, 412, 437, 412, 1283, 412, 441, 411, 432, 412, 1285, 411, 1289, 411, 435, 410, 1287, 411, 437, 411, 435, 410, 1286, 410, 1286, 411, 438, 410, 1287, 411, 1284, 410, 438, 411, 442, 410, 1285, 410, 435, 410, 438, 410, 1286, 410, 440, 410, 437, 410, 441, 409, 436, 410, 438, 410, 440, 410, 438, 410, 436, 410, 439, 409, 441, 410, 437, 410, 438, 410, 437, 410, 438, 410, 440, 410, 437, 409, 439, 410, 439, 410, 437, 410, 441, 410, 1287, 410, 434, 410, 438, 410, 440, 410, 437, 409, 439, 410, 1286, 410, 1289, 410, 436, 409, 439, 409, 439, 409, 439, 410, 440, 409, 1285, 410, 438, 410, 440, 409, 438, 409, 439, 409, 439, 409, 439, 409, 1289, 409, 1285, 410, 440, 409, 1287, 409, 1286, 409, 439, 409, 441, 408, 1288, 409, 1286, 409, 440, 408, 1287, 409, 1289, 408, 1290, 408, 1285, 408, 441, 407, 441, 407, 445, 408, 439, 407, 438, 408, 440, 408, 441, 407, 445, 407, 437, 407, 442, 407, 442, 406, 440, 407, 441, 407, 442, 406, 443, 407, 443, 406, 439, 407, 443, 406, 440, 406, 447, 406, 438, 406, 442, 406, 443, 406, 441, 406, 442, 406, 442, 406, 442, 406, 442, 406, 444, 405, 442, 405, 443, 405, 443, 405, 443, 406, 442, 406, 444, 405, 442, 405, 443, 405, 443, 405, 447, 405, 440, 405, 444, 405, 443, 405, 441, 405, 444, 404, 444, 404, 445, 405, 443, 405, 442, 405, 445, 404, 442, 405, 448, 404, 440, 404, 444, 404, 446, 404, 442, 404, 449, 404, 440, 404, 444, 404, 1293, 404, 446, 404, 442, 403, 444, 404, 444, 405, 445, 404, 443, 404])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 20!")
+    
+def set_temp_21():
+    signal_to_send = array.array('H', [3398, 1693, 438, 1283, 413, 1288, 413, 433, 412, 435, 411, 440, 411, 1283, 412, 436, 410, 439, 411, 1287, 411, 1284, 411, 439, 410, 1283, 411, 438, 410, 438, 410, 1288, 410, 1285, 410, 438, 410, 1289, 410, 1288, 410, 434, 410, 439, 409, 1287, 409, 441, 409, 442, 409, 1286, 409, 439, 409, 438, 409, 438, 409, 443, 409, 438, 409, 439, 409, 439, 409, 437, 408, 440, 409, 439, 409, 440, 409, 441, 409, 437, 408, 440, 408, 440, 408, 445, 407, 437, 407, 441, 407, 445, 406, 439, 406, 1292, 405, 442, 405, 444, 405, 442, 404, 446, 404, 447, 404, 1289, 403, 1317, 379, 470, 380, 468, 380, 471, 380, 1315, 380, 466, 379, 1319, 379, 468, 378, 470, 379, 469, 379, 471, 378, 469, 378, 470, 378, 1319, 377, 1320, 378, 470, 378, 1322, 377, 1318, 377, 471, 377, 470, 377, 1318, 377, 1320, 376, 472, 376, 1321, 351, 1345, 375, 1326, 351, 1344, 351, 496, 350, 500, 350, 495, 350, 499, 349, 499, 350, 500, 349, 525, 325, 521, 324, 527, 324, 521, 324, 529, 324, 519, 325, 524, 324, 527, 324, 523, 324, 527, 323, 521, 323, 525, 324, 526, 323, 524, 323, 525, 323, 525, 323, 525, 323, 527, 323, 528, 323, 524, 323, 524, 323, 524, 322, 526, 322, 531, 321, 526, 321, 528, 321, 550, 296, 551, 296, 552, 296, 552, 296, 554, 296, 554, 271, 574, 271, 577, 271, 578, 271, 581, 271, 573, 271, 577, 271, 579, 271, 576, 271, 582, 270, 574, 270, 578, 270, 580, 270, 578, 270, 577, 270, 578, 270, 578, 270, 606, 243, 578, 269, 609, 244, 1422, 270, 1453, 244, 603, 244, 604, 244, 605, 244, 604, 244, 606, 243, 603, 244])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 21!")
+    
+def set_temp_22():
+    signal_to_send = array.array('H', [3399, 1694, 437, 1284, 413, 1288, 413, 433, 412, 435, 412, 439, 412, 1283, 412, 435, 412, 438, 412, 1286, 412, 1283, 412, 438, 411, 1283, 411, 437, 412, 437, 411, 1287, 411, 1284, 411, 438, 410, 1289, 411, 1287, 411, 433, 411, 438, 410, 1286, 411, 439, 411, 440, 411, 1284, 411, 438, 411, 436, 411, 436, 410, 442, 411, 436, 411, 437, 411, 438, 411, 434, 411, 438, 410, 438, 411, 439, 411, 439, 410, 435, 411, 437, 411, 438, 410, 442, 411, 434, 410, 438, 410, 441, 411, 435, 410, 1288, 410, 437, 410, 439, 411, 436, 411, 439, 410, 441, 411, 1281, 411, 1286, 411, 439, 410, 439, 410, 438, 410, 440, 409, 1284, 410, 1289, 409, 438, 409, 439, 409, 439, 410, 440, 409, 438, 409, 439, 410, 1287, 409, 1289, 409, 439, 409, 1291, 409, 1286, 409, 440, 408, 439, 408, 1286, 409, 1288, 409, 440, 408, 1288, 409, 1288, 408, 1293, 408, 1287, 408, 439, 408, 442, 408, 438, 407, 441, 407, 441, 408, 442, 408, 442, 407, 438, 408, 443, 408, 438, 407, 446, 407, 437, 407, 441, 407, 444, 407, 440, 407, 445, 406, 438, 406, 442, 407, 443, 407, 440, 406, 442, 406, 442, 407, 442, 406, 444, 406, 445, 406, 441, 406, 440, 407, 440, 407, 442, 406, 446, 406, 441, 406, 442, 406, 441, 406, 441, 406, 443, 406, 442, 406, 444, 405, 445, 405, 440, 406, 443, 405, 443, 405, 447, 406, 438, 406, 443, 405, 444, 406, 442, 405, 447, 405, 439, 405, 444, 405, 445, 405, 443, 405, 442, 405, 443, 405, 444, 404, 445, 405, 442, 405, 445, 404, 443, 404, 447, 405, 1290, 405, 443, 404, 444, 404, 447, 404, 443, 404, 443, 404])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 20!")
+    
+def set_temp_23():
+    signal_to_send = array.array('H', [3398, 1694, 436, 1286, 412, 1283, 412, 439, 412, 434, 411, 437, 411, 1288, 411, 435, 411, 439, 411, 1287, 410, 1285, 410, 435, 410, 1287, 411, 436, 410, 438, 410, 1290, 409, 1285, 410, 437, 410, 1286, 410, 1286, 410, 439, 409, 440, 410, 1285, 410, 438, 410, 438, 410, 1290, 410, 435, 409, 438, 410, 440, 410, 437, 409, 443, 410, 434, 409, 439, 410, 440, 409, 439, 409, 437, 410, 438, 410, 438, 410, 440, 410, 436, 410, 440, 410, 436, 411, 438, 410, 438, 410, 442, 410, 434, 410, 1289, 410, 437, 409, 438, 409, 441, 409, 437, 409, 439, 409, 1289, 409, 1285, 410, 441, 410, 439, 409, 436, 409, 1289, 409, 1285, 409, 1287, 410, 440, 409, 441, 409, 436, 409, 439, 409, 439, 409, 441, 408, 1289, 409, 1285, 408, 441, 409, 1289, 408, 1287, 408, 443, 408, 436, 408, 1290, 408, 1286, 408, 442, 407, 1287, 408, 1291, 408, 1288, 408, 1287, 408, 439, 407, 443, 407, 441, 407, 442, 407, 439, 406, 442, 406, 443, 407, 440, 407, 441, 406, 442, 407, 444, 407, 440, 406, 442, 406, 441, 406, 442, 406, 445, 406, 439, 406, 442, 406, 444, 405, 442, 405, 444, 406, 441, 405, 443, 405, 444, 406, 443, 405, 441, 405, 447, 406, 441, 405, 443, 406, 441, 405, 443, 405, 446, 405, 439, 405, 445, 404, 445, 405, 441, 404, 444, 404, 444, 404, 445, 404, 446, 404, 441, 404, 447, 404, 443, 404, 447, 404, 439, 405, 444, 404, 447, 404, 442, 404, 443, 404, 444, 404, 444, 404, 446, 403, 443, 404, 445, 403, 446, 404, 443, 403, 446, 404, 1291, 404, 444, 404, 1292, 404, 446, 403, 447, 403, 442, 403, 445, 403, 447, 403])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 23!")
+    
+def set_temp_24():
+    signal_to_send = array.array('H', [3396, 1698, 437, 1282, 412, 1283, 413, 436, 412, 436, 411, 439, 411, 1283, 411, 442, 411, 433, 411, 1285, 411, 1290, 410, 435, 410, 1288, 410, 438, 410, 435, 410, 1286, 410, 1287, 410, 438, 410, 1288, 409, 1285, 410, 439, 410, 442, 410, 1285, 410, 435, 410, 438, 410, 1286, 410, 440, 410, 437, 410, 441, 410, 435, 410, 438, 410, 440, 410, 438, 410, 437, 410, 438, 410, 441, 410, 436, 410, 438, 411, 436, 410, 438, 410, 440, 410, 437, 410, 438, 410, 440, 410, 436, 410, 442, 409, 1288, 410, 434, 410, 438, 410, 440, 410, 437, 409, 439, 409, 1287, 410, 1290, 409, 436, 410, 438, 410, 439, 409, 439, 409, 441, 409, 438, 409, 1287, 409, 441, 408, 438, 409, 439, 409, 440, 408, 440, 408, 1289, 409, 1286, 408, 443, 407, 1289, 407, 1288, 407, 442, 406, 444, 405, 1290, 406, 1289, 406, 443, 405, 1291, 405, 1293, 404, 1294, 404, 1290, 403, 445, 403, 469, 379, 474, 378, 468, 379, 466, 379, 470, 378, 470, 378, 474, 378, 466, 378, 472, 378, 470, 378, 469, 378, 470, 378, 470, 377, 472, 378, 472, 377, 468, 378, 472, 377, 470, 377, 475, 377, 467, 377, 471, 377, 473, 376, 470, 377, 472, 376, 472, 376, 472, 376, 472, 376, 474, 376, 471, 375, 473, 375, 473, 375, 473, 375, 473, 375, 475, 374, 473, 374, 474, 350, 498, 350, 503, 349, 497, 348, 500, 348, 500, 348, 523, 324, 524, 324, 525, 323, 526, 324, 524, 324, 523, 323, 527, 323, 523, 324, 529, 323, 521, 323, 525, 323, 527, 322, 525, 322, 530, 322, 522, 322, 526, 322, 1376, 322, 1373, 321, 528, 321, 528, 321, 526, 320, 553, 295, 555, 295])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 24!")
+    
+def set_temp_25():
+    signal_to_send = array.array('H', [3400, 1693, 437, 1286, 412, 1283, 412, 439, 412, 434, 411, 437, 411, 1288, 411, 436, 411, 438, 411, 1287, 411, 1284, 410, 435, 411, 1287, 410, 437, 410, 438, 410, 1289, 410, 1285, 410, 437, 410, 1286, 410, 1286, 410, 439, 409, 440, 410, 1285, 410, 438, 410, 438, 410, 1291, 410, 434, 410, 438, 410, 440, 409, 437, 410, 443, 410, 434, 409, 439, 409, 440, 410, 439, 409, 437, 410, 438, 410, 439, 409, 440, 410, 437, 410, 439, 410, 437, 410, 438, 410, 438, 410, 443, 409, 435, 409, 1290, 410, 437, 410, 436, 410, 440, 410, 437, 409, 439, 409, 1289, 409, 1286, 409, 442, 409, 439, 409, 436, 409, 1292, 409, 438, 409, 439, 409, 1285, 410, 439, 409, 437, 409, 440, 409, 441, 408, 438, 409, 1289, 408, 1287, 408, 440, 409, 1287, 409, 1292, 408, 436, 408, 440, 408, 1290, 408, 1286, 408, 441, 407, 1289, 408, 1288, 408, 1288, 408, 1293, 408, 436, 408, 440, 408, 442, 407, 441, 407, 440, 407, 441, 407, 441, 407, 443, 407, 444, 407, 438, 407, 440, 406, 442, 407, 441, 407, 446, 406, 440, 407, 439, 406, 443, 407, 440, 406, 442, 406, 443, 405, 444, 406, 442, 406, 441, 406, 442, 406, 442, 406, 447, 405, 438, 406, 443, 405, 444, 406, 441, 405, 448, 405, 438, 405, 446, 405, 442, 405, 443, 405, 442, 405, 443, 405, 444, 404, 445, 405, 443, 405, 443, 405, 442, 404, 444, 405, 443, 405, 443, 405, 445, 404, 443, 404, 444, 404, 444, 404, 444, 404, 447, 405, 442, 404, 444, 404, 443, 404, 444, 404, 444, 404, 445, 403, 1294, 404, 1291, 404, 1292, 404, 446, 404, 446, 403, 442, 404, 444, 404, 446, 403])
+    ir_led.send(signal_to_send)
+    print("TEMP SET TO 25!")
+
+def draw_bar_graph(temp, humidity, setpoint):
+    """
+    Draws a bar graph for temperature and humidity using pixels.
+    - Temperature bar at x=40
+    - Humidity bar at x=140
+    """
+
+    # Graph base (X-axis at bottom)
+    for x in range(10, 235):  # Base line
+        display.pixel(x, 120, 0)
+        
+    # Draw Y-axis (left side)
+    for y in range(45, 121):  
+        display.pixel(20, y, 0)
+
+    # Normalize values (assuming temp: 0-50°C, humidity: 0-100%)
+    temp_height = int((temp / 30) * 60)  # Scale temp to max 60 pixels height
+    humidity_height = int((humidity / 100) * 80)  # Scale humidity to max 60 pixels height
+    setpoint_height = int((setpoint / 30) * 60)
+    
+    # Draw Temperature Bar (x=40)
+    for x in range(40, 70):  # Bar width
+        for y in range(120 - temp_height, 120):  # Height based on temp
+            display.pixel(x, y, 0)
+
+    # Draw Humidity Bar (x=140)
+    for x in range(140, 170):  # Bar width
+        for y in range(120 - humidity_height, 120):  # Height based on humidity
+            if x % 6 < 3:  # Creates a striped effect (every alternate 3-pixel section)
+                display.pixel(x, y, 0)
+            
+        # Draw Dotted Setpoint Marker (horizontal line at setpoint height)
+    for x in range(25, 230, 4):  # Skip pixels to create a dotted effect
+        display.pixel(x, 120 - setpoint_height, 0)
+
+# Set up socket pool
+pool = socketpool.SocketPool(wifi.radio)
+
+# Set up I2C and SHTC3 sensor
+i2c = busio.I2C(board.GP3, board.GP2)  # SCL=GP1, SDA=GP0
+shtc3 = adafruit_shtc3.SHTC3(i2c)
+
+# Set up onboard LED
+led = digitalio.DigitalInOut(board.LED)
+led.direction = digitalio.Direction.OUTPUT
+
+last_sensor_time = 0  # Track last sensor update time
+last_command_time = 0  # Track last command check time
+last_check_time = 0
+
+temp = 999
+
+
+# Create a PID controller with tuned values
+pid = PID(4, 0.05, 0, setpoint=24, sample_time=300)  # Tune P, I, D values
+#print('setpoint is:',setpoint)
+pid.output_limits = (-24, 25)  # AC can only be set between 18-25°C
+last_set_temperature = None # Stores last temperature sent to AC
+
+
+while True:
+    current_time = time.monotonic()  # Get current time in seconds
+    
+        # ✅ Check for commands every 0.5 second
+    if current_time - last_command_time >= 0.01:
+        try:
+            s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+            s.connect((PI_IP, PORT))
+            s.send("REQUEST_COMMAND".encode())  # Ask for command
+            
+
+            # Receive response
+            buffer = bytearray(1024)
+            num_bytes = s.recv_into(buffer)
+            response = buffer[:num_bytes].decode().strip()
+            #print("Received command from Raspberry Pi:", response)
+            s.close()
+
+            # Process command
+            if response == "LED ON":
+                led.value = True
+                send_signal(True)
+                print("AC Turned ON")
+                s.close()
+            elif response == "LED OFF":
+                led.value = False
+                send_signal(False)
+                print("AC Turned OFF")
+                s.close()
+            elif response.startswith("SET TEMP"):
+                # Extract temperature from command (e.g., "SET TEMP 22.5")
+                temp = float(response.split(" ")[2])
+                manual_set_temperature(temp)
+
+                s.close()
+            
+
+        except Exception as e:
+            print("Error 2 command:", e)
+            
+
+        last_command_time = current_time  # Update last command
+    
+    
+    # ✅ Send sensor data every 5 seconds
+    if current_time - last_sensor_time >= 5:
+        try:
+            s = pool.socket(pool.AF_INET, pool.SOCK_STREAM)
+            s.settimeout(5)  # Prevent long hangs
+
+            #print(f"🔗 Connecting to {PI_IP}:{PORT}...")
+            s.connect((PI_IP, PORT))
+
+            # Read sensor data
+            temperature, humidity = shtc3.measurements
+
+            # Send in format "23.45,55.12"
+            message = f"{temperature:.2f},{humidity:.2f}"
+            #print(f"📡 Sending: {message}")
+
+            s.send(message.encode())
+            s.close()
+
+        except Exception as e:
+            print("Error sending data:", e)
+
+    last_sensor_time = current_time  
+    #Update last sensor update time
+
+    # Loop to trigger set_temperature function
+    if current_time - last_check_time >= 300:
+        current_temp, _ = shtc3.measurements  # Read current room temp
+        pid_output = pid(current_temp)
+        print('Checking if current temp is target temp... Target temp:', temp)
+        time.sleep(5)
+        if temp != 999 and abs(current_temp - temp) > 0.5:
+            set_temperature(temp)
+            print('setpoint temp:',temp)
+            print(f"Raw PID Output: {pid_output:.2f}")  # Print BEFORE clamping
+        else:
+            print('deadband reached temp+-0.5 of:',temp)
+        last_check_time = current_time  # Update last command
+            
+       
+        
+            
+    else:
+
+        temperature, humidity = shtc3.measurements  # Read sensor data
+
+        timenow = current_time
+        
+        #display.display() # refresh display
+        
+        # Example Usage
+        draw_bar_graph(temperature, humidity, temp)  # 25°C and 60% Humidity
+
+
+        # Add text to sections
+        # First row: Weather condition
+        display.text("Pico 1", 10, 10, 0)  # Weather condition
+        display.text(f"{timenow:.1f} Hrs", 10, 20, 0)          # Sun icon as text
+
+        # Second row: Temperature, Wind, Pressure
+        display.text(f"{temperature:.1f}\u0060C", 145, 25, 0)
+        display.text("Temp", 145, 10, 0)
+        display.text(f"{humidity:.1f}%", 195, 25, 0)
+        display.text("Humidity", 195, 10, 0)
+        #display.text("1012", 180, 50, 0)       # Pressure
+        #display.text("Pressure", 180, 65, 0)
+
+        # Third row: Trend and Min/Max
+        #display.text("Rising", 10, 90, 0)      # Trend
+        #display.text("Trend", 10, 105, 0)
+        #display.text("Min: 1.6", 90, 90, 0)    # Min value
+        #display.text("Max: 7.3", 180, 90, 0)   # Max value
+
+        binary_pixel_array = [
+            [1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1],
+            [0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1],
+            [0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0],
+            [0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+            [0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+            [1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1],
+            [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0],
+            [1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1],
+            [0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1],
+            [0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1],
+            [1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1],
+            [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0],
+            [1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0],
+            [1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1],
+            [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0]
+        ]
+
+        # ✅ Position and scale QR code within the last row
+        qr_start_x = 100  # Adjust X position within grid
+        qr_start_y = 5   # Adjust Y position within grid
+        qr_scale = 1      # Scale factor to make it larger
+
+        # Draw the QR code
+        for y, row in enumerate(binary_pixel_array):
+            for x, pixel in enumerate(row):
+                color = 0 if pixel == 1 else 1  # 1 = Black, 0 = White
+                for dy in range(qr_scale):  # Scale up vertically
+                    for dx in range(qr_scale):  # Scale up horizontally
+                        display.pixel(qr_start_x + (x * qr_scale) + dx, qr_start_y + (y * qr_scale) + dy, color)
+
+
+
+        # Refresh the display to show the changes
+        display.display()
+        display.fill(1)  # White background
+
+        # Wait before powering down
+        time.sleep(300)
+        display.power_down()
