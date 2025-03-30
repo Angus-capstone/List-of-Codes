@@ -1,0 +1,29 @@
+                    # Save to CSV file
+                    with open(CSV_FILE, "a", newline="") as file:
+                        writer = csv.writer(file)
+                        writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), latest_temp, latest_humidity])
+
+                except ValueError:
+                    print("Invalid Data Format")
+
+            # ✅ If it's a command request, only send if changed
+            elif data == "REQUEST_COMMAND":
+                if led_status != previous_led_status:
+                    print("Pico W requested command. Sending:", led_status)
+                    conn.send(led_status.encode())
+                    previous_led_status = led_status  # Update last sent command
+                else:
+                    #print("No change in command. Not sending.")
+                    conn.send("No Change".encode())
+
+        except Exception as e:
+            print("Error:", e)
+
+        finally:
+            conn.close()
+            pico_connection = None
+
+if __name__ == "__main__":
+    from threading import Thread
+    Thread(target=start_server).start()
+    socket_server()
